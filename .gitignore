@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+backend/.env
+backend/pow_reminder.db
+backend/uploads/
+uploads/
+.env
+.DS_Store
+Thumbs.db
+
