@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# Local environment and secrets
+backend/.env
+
+# Local database and uploads
+backend/pow_reminder.db
+backend/uploads/
+uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
+

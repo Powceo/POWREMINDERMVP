@@ -1,14 +1,19 @@
 from fastapi import APIRouter, HTTPException, Form, Response, Query
 from fastapi.responses import JSONResponse
 from twilio.twiml.voice_response import VoiceResponse
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 import logging
 from services.twilio_client import twilio_service
+from services.call_queue import call_queue
 from models import appointment_store, AppointmentStatus
 from settings import settings
 
 class CallRequest(BaseModel):
+    override_window: bool = False
+
+class BatchCallRequest(BaseModel):
+    appointment_ids: List[str]
     override_window: bool = False
 
 logger = logging.getLogger(__name__)
@@ -22,13 +27,7 @@ async def initiate_call(appointment_id: str, request: CallRequest = CallRequest(
     if not settings.validate():
         raise HTTPException(status_code=500, detail="Twilio configuration incomplete. Please check your .env file.")
     
-    # Check call window unless override is enabled
-    if not override and not settings.is_within_call_window():
-        logger.info(f"Outside call window and override not enabled")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Calls can only be made between {settings.CALL_WINDOW_START} and {settings.CALL_WINDOW_END}. Check 'Override call window' to call anyway."
-        )
+    # Call window restriction removed per practice workflow
     
     appointment = appointment_store.get_appointment(appointment_id)
     if not appointment:
@@ -42,8 +41,6 @@ async def initiate_call(appointment_id: str, request: CallRequest = CallRequest(
         
         if call_sid:
             message = "Call initiated successfully."
-            if override:
-                message += " (Override active - calling outside normal hours)"
             return JSONResponse(content={
                 "success": True,
                 "call_sid": call_sid,
@@ -128,8 +125,24 @@ async def handle_status(
     logger.info(f"Status webhook: CallSid={CallSid}, Status={CallStatus}, AnsweredBy={AnsweredBy}")
     
     twilio_service.handle_status_callback(CallSid, CallStatus, AnsweredBy)
+    # Advancing the queue is handled inside TwilioService after updating statuses
     
     return Response(content="", status_code=200)
+
+@router.post("/api/calls/batch")
+async def start_batch_call(request: BatchCallRequest):
+    if not request.appointment_ids:
+        raise HTTPException(status_code=400, detail="No appointments provided")
+    status = call_queue.start_batch(request.appointment_ids, request.override_window)
+    return JSONResponse(content=status)
+
+@router.get("/api/calls/batch-status")
+async def get_batch_status():
+    return JSONResponse(content=call_queue.get_status())
+
+@router.post("/api/calls/batch-cancel")
+async def cancel_batch():
+    return JSONResponse(content=call_queue.cancel())
 
 @router.post("/twilio/dial-status")
 async def handle_dial_status(

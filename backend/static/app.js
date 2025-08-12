@@ -1,23 +1,9 @@
 let appointments = [];
 let callInProgress = {};
+let selectedIds = new Set();
+let batchStatusTimer = null;
 
-async function checkCallWindow() {
-    try {
-        const response = await fetch('/healthz');
-        const data = await response.json();
-        const statusEl = document.getElementById('callWindowStatus');
-        
-        if (data.call_window_active) {
-            statusEl.className = 'call-window-info active';
-            statusEl.innerHTML = `✓ Call Window Active: ${data.settings.call_window}`;
-        } else {
-            statusEl.className = 'call-window-info inactive';
-            statusEl.innerHTML = `✗ Outside Call Window: ${data.settings.call_window}`;
-        }
-    } catch (error) {
-        console.error('Error checking call window:', error);
-    }
-}
+// Call window display removed
 
 async function loadAppointments() {
     try {
@@ -62,6 +48,7 @@ function renderAppointments() {
         <table>
             <thead>
                 <tr>
+                    <th><input type="checkbox" id="selectAll" /></th>
                     <th>Patient</th>
                     <th>Phone</th>
                     <th>Date</th>
@@ -76,6 +63,7 @@ function renderAppointments() {
             <tbody>
                 ${appointments.map(apt => `
                     <tr>
+                        <td><input type="checkbox" class="rowSelect" data-id="${apt.id}" ${selectedIds.has(apt.id) ? 'checked' : ''} /></td>
                         <td>${escapeHtml(apt.patient_name)}</td>
                         <td>${apt.phone}</td>
                         <td>${apt.appointment_date || 'Not set'}</td>
@@ -97,9 +85,41 @@ function renderAppointments() {
                 `).join('')}
             </tbody>
         </table>
+        <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+            <button id="callSelectedBtn" ${selectedIds.size === 0 ? 'disabled' : ''}>Call Selected</button>
+            <button id="cancelBatchBtn">Cancel Batch</button>
+            <span id="batchStatus" style="font-size:12px;color:#555;"></span>
+        </div>
     `;
     
     container.innerHTML = table;
+
+    // Wire selection events
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+        selectAll.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                appointments.forEach(a => selectedIds.add(a.id));
+            } else {
+                selectedIds.clear();
+            }
+            renderAppointments();
+        });
+    }
+    document.querySelectorAll('.rowSelect').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+            const id = e.target.getAttribute('data-id');
+            if (e.target.checked) selectedIds.add(id); else selectedIds.delete(id);
+            // Update button state without full re-render
+            const btn = document.getElementById('callSelectedBtn');
+            if (btn) btn.disabled = selectedIds.size === 0;
+        });
+    });
+
+    const callBtn = document.getElementById('callSelectedBtn');
+    if (callBtn) callBtn.addEventListener('click', startBatchCall);
+    const cancelBtn = document.getElementById('cancelBatchBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', cancelBatchCall);
 }
 
 function renderActions(apt) {
@@ -120,6 +140,60 @@ function renderActions(apt) {
             ${apt.status === 'Calling' ? 'Calling...' : 'Call Now'}
         </button>
     `;
+}
+async function startBatchCall() {
+    if (selectedIds.size === 0) return;
+    const override = false;
+    const ids = Array.from(selectedIds);
+    try {
+        const res = await fetch('/api/calls/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ appointment_ids: ids, override_window: override })
+        });
+        if (!res.ok) throw new Error('Batch start failed');
+        showMessage('callMessage', 'success', 'Batch calling started.');
+        pollBatchStatus();
+    } catch (e) {
+        showMessage('callMessage', 'error', 'Failed to start batch calling.');
+    }
+}
+
+async function cancelBatchCall() {
+    try {
+        await fetch('/api/calls/batch-cancel', { method: 'POST' });
+        showMessage('callMessage', 'success', 'Batch cancelled.');
+        stopBatchPolling();
+        await loadAppointments();
+    } catch (e) {}
+}
+
+async function pollBatchStatus() {
+    stopBatchPolling();
+    batchStatusTimer = setInterval(async () => {
+        try {
+            const res = await fetch('/api/calls/batch-status');
+            const data = await res.json();
+            const el = document.getElementById('batchStatus');
+            if (el) {
+                el.textContent = data.active
+                    ? `Active — queued: ${data.queued_count}, done: ${data.done_count}, errors: ${data.error_count}`
+                    : 'Idle';
+            }
+            if (!data.active) {
+                stopBatchPolling();
+                // refresh table at the end
+                await loadAppointments();
+            }
+        } catch {}
+    }, 2000);
+}
+
+function stopBatchPolling() {
+    if (batchStatusTimer) {
+        clearInterval(batchStatusTimer);
+        batchStatusTimer = null;
+    }
 }
 
 function renderOutcome(apt) {
@@ -146,8 +220,7 @@ async function initiateCall(appointmentId) {
     callInProgress[appointmentId] = true;
     renderAppointments();
     
-    const overrideCheckbox = document.getElementById('overrideCallWindow');
-    const override = overrideCheckbox ? overrideCheckbox.checked : false;
+    const override = false;
     
     console.log('Override checkbox checked:', override);  // Debug log
     
@@ -235,8 +308,6 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     }
 });
 
-checkCallWindow();
 loadAppointments();
 
-setInterval(checkCallWindow, 60000);
 setInterval(loadAppointments, 3000);  // Refresh every 3 seconds to see status updates

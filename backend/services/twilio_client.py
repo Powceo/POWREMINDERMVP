@@ -20,9 +20,7 @@ class TwilioService:
             logger.error("Twilio client not initialized")
             return None
         
-        if not override_window and not settings.is_within_call_window():
-            logger.info(f"Outside call window, skipping call to {appointment.phone}")
-            return None
+        # Call window restriction removed per practice workflow
         
         try:
             # Check if we have a valid PUBLIC webhook URL
@@ -266,5 +264,14 @@ class TwilioService:
             appointment.status = AppointmentStatus.NOT_CONFIRMED
             appointment.notes = f"Call failed: {call_status}"
             appointment.needs_callback = False
+
+        # Notify queue that this call completed so it can advance
+        if call_status in ["completed", "no-answer", "busy", "failed", "canceled", "cancelled"]:
+            try:
+                # Lazy import to avoid circular import at module import time
+                from services.call_queue import call_queue  # type: ignore
+                call_queue.on_call_finished(call_sid)
+            except Exception as e:
+                logger.debug(f"CallQueue advance error ignored: {e}")
 
 twilio_service = TwilioService()

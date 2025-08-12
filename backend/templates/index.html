@@ -295,9 +295,7 @@
         <div class="header">
             <h1>POW Reminder Dashboard</h1>
             <div class="subtitle">Patient Appointment Confirmation System</div>
-            <div id="callWindowStatus" class="call-window-info">
-                Call Window: {{ call_window_start }} - {{ call_window_end }} {{ timezone }}
-            </div>
+            
         </div>
 
         <div class="upload-section">
@@ -314,12 +312,7 @@
                 <h2>Unconfirmed Appointments</h2>
                 <span class="count-badge" id="appointmentCount">0 appointments</span>
             </div>
-            <div class="override-section">
-                <input type="checkbox" id="overrideCallWindow" class="override-checkbox">
-                <label for="overrideCallWindow" class="override-label">
-                    Override call window restriction (allow calls outside {{ call_window_start }} - {{ call_window_end }})
-                </label>
-            </div>
+            
             <div id="callMessage" class="message"></div>
             <div id="appointmentsTable"></div>
         </div>
